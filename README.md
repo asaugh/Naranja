@@ -1,6 +1,6 @@
 # Naranja 🍊
 
-**A free, offline file converter for macOS, written in Rust.** Drop files into the window, choose a format, and find the result beside the original. No account, upload, conversion quota, or paid tier.
+**A free, offline file converter for macOS, written in Rust.** Drop files onto its conversion wheel, choose a format, and find the result beside the original. No account, upload, conversion quota, or paid tier.
 
 Naranja is inspired by the quick file workflow of [Tangerine for Mac](https://tangerineformac.com/). It is an independent project and is not affiliated with Tangerine. It uses its own name, interface, and code.
 
@@ -18,6 +18,8 @@ Naranja is inspired by the quick file workflow of [Tangerine for Mac](https://ta
 | Actions | Copy path, reveal in Finder, open file, open its folder in Terminal, copy or move into another folder |
 
 Conversions run locally. Outputs receive a new name when a file with the intended name already exists, so an original is not overwritten. Batch conversion applies the chosen format to all compatible files in the list.
+
+The native interface uses a six-slice wheel. Switch between **Convert**, **Tools**, and **Actions** with the tabs or Shift, Command, and Control while dragging into the window. Hover a slice and drop to apply it, or click it after adding a file. The orange-slice icon is original artwork included as an editable SVG in `assets/`.
 
 ## Install and run
 
@@ -48,7 +50,7 @@ cargo run --release -- extract archive.zip
 
 ## Scope and roadmap
 
-This is an early working release. Tangerine currently describes a much larger set of conversion paths and advanced tools. Naranja does **not** yet have a global Finder drag overlay, AirDrop and floating-file actions, PDF and Office conversions, or every codec combination. The interface only lists operations implemented in this repository; codecs supplied by FFmpeg and macOS can still vary by machine. Contributions toward these areas are welcome.
+This is an early working release. Tangerine currently describes a much larger set of conversion paths and advanced tools. Naranja's wheel works within its app window; it does **not** yet appear globally during a Finder drag. AirDrop and floating-file actions, PDF and Office conversions, and some codec combinations also remain. The interface lists operations implemented in this repository; codecs supplied by FFmpeg and macOS can vary by machine. Contributions toward these areas are welcome.
 
 Good next steps: a global drag trigger with macOS Accessibility permission, an explicit conversion capability registry, PDF/Office backends, more media tools, and signed release builds.
 

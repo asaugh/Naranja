@@ -1,11 +1,10 @@
 mod engine;
+mod interface;
 
-use eframe::egui::{self, Color32, RichText, Stroke};
+use eframe::egui::{self, Color32};
 use std::{path::PathBuf, process::Command, sync::mpsc};
 
-const ORANGE: Color32 = Color32::from_rgb(255, 143, 70);
-const CREAM: Color32 = Color32::from_rgb(252, 240, 221);
-const DARK: Color32 = Color32::from_rgb(32, 35, 40);
+const ORANGE: Color32 = Color32::from_rgb(247, 109, 45);
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
@@ -54,8 +53,12 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Naranja")
-            .with_inner_size([900.0, 680.0])
-            .with_min_inner_size([600.0, 480.0])
+            .with_inner_size([1080.0, 760.0])
+            .with_min_inner_size([790.0, 610.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/naranja-icon.png"))
+                    .expect("Valid app icon"),
+            )
             .with_drag_and_drop(true),
         ..Default::default()
     };
@@ -70,17 +73,17 @@ fn main() -> eframe::Result {
 }
 
 fn configure_style(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = DARK;
-    visuals.window_fill = DARK;
-    visuals.widgets.inactive.bg_fill = Color32::from_rgb(55, 58, 63);
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(82, 68, 59);
+    let mut visuals = egui::Visuals::light();
+    visuals.panel_fill = Color32::WHITE;
+    visuals.window_fill = Color32::WHITE;
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(246, 246, 244);
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(255, 235, 216);
     visuals.selection.bg_fill = ORANGE;
-    visuals.selection.stroke.color = DARK;
+    visuals.selection.stroke.color = Color32::WHITE;
     ctx.set_visuals(visuals);
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(12.0, 12.0);
-    style.spacing.button_padding = egui::vec2(13.0, 8.0);
+    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+    style.spacing.button_padding = egui::vec2(15.0, 9.0);
     ctx.set_style(style);
 }
 
@@ -106,6 +109,8 @@ struct NaranjaApp {
     width: String,
     crop: String,
     split_seconds: String,
+    active_tool: Option<String>,
+    wheel_page: usize,
 }
 
 impl NaranjaApp {
@@ -219,349 +224,6 @@ impl NaranjaApp {
             }
             _ => {}
         }
-    }
-}
-
-impl eframe::App for NaranjaApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let dropped: Vec<_> = ctx.input(|input| {
-            input
-                .raw
-                .dropped_files
-                .iter()
-                .filter_map(|f| f.path.clone())
-                .collect()
-        });
-        if !dropped.is_empty() {
-            self.add_files(dropped);
-        }
-        if let Some(receiver) = &self.receiver
-            && let Ok(result) = receiver.try_recv()
-        {
-            self.busy = false;
-            match result {
-                Ok(outputs) => {
-                    self.status = format!("Created {} item(s)", outputs.len());
-                    self.last_outputs = outputs;
-                }
-                Err(error) => self.status = error,
-            }
-            self.receiver = None;
-        }
-        if self.busy {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        }
-
-        egui::TopBottomPanel::top("header").show(ctx, |ui| {
-            ui.add_space(18.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("●").size(28.0).color(ORANGE));
-                ui.label(RichText::new("Naranja").size(29.0).strong().color(CREAM));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new("FREE  •  OFFLINE  •  OPEN SOURCE")
-                            .size(11.0)
-                            .color(Color32::LIGHT_GRAY),
-                    );
-                });
-            });
-            ui.label(
-                RichText::new("The little file workshop for your Mac.")
-                    .size(15.0)
-                    .color(Color32::LIGHT_GRAY),
-            );
-            ui.add_space(16.0);
-        });
-
-        egui::SidePanel::left("files")
-            .resizable(true)
-            .default_width(265.0)
-            .min_width(200.0)
-            .show(ctx, |ui| {
-                ui.add_space(16.0);
-                ui.label(
-                    RichText::new("YOUR FILES")
-                        .size(11.0)
-                        .strong()
-                        .color(ORANGE),
-                );
-                ui.add_space(8.0);
-                if ui.button("＋  Add files").clicked()
-                    && let Some(paths) = rfd::FileDialog::new().pick_files()
-                {
-                    self.add_files(paths);
-                }
-                if ui.button("＋  Add folder").clicked()
-                    && let Some(path) = rfd::FileDialog::new().pick_folder()
-                {
-                    self.add_files([path]);
-                }
-                ui.separator();
-                if self.files.is_empty() {
-                    ui.add_space(28.0);
-                    ui.label(RichText::new("Drop files here").size(18.0).color(CREAM));
-                    ui.label("or use the buttons above");
-                } else {
-                    let mut remove = None;
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (index, file) in self.files.iter().enumerate() {
-                            ui.horizontal(|ui| {
-                                let label = file.file_name().unwrap_or_default().to_string_lossy();
-                                if ui
-                                    .selectable_label(
-                                        self.selected == index,
-                                        format!("{}  {label}", icon(file)),
-                                    )
-                                    .clicked()
-                                {
-                                    self.selected = index;
-                                }
-                                if ui.small_button("×").clicked() {
-                                    remove = Some(index);
-                                }
-                            });
-                        }
-                    });
-                    if let Some(index) = remove {
-                        self.files.remove(index);
-                        self.selected = self.selected.min(self.files.len().saturating_sub(1));
-                    }
-                    ui.add_space(8.0);
-                    if ui.small_button("Clear all").clicked() {
-                        self.files.clear();
-                        self.last_outputs.clear();
-                    }
-                }
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(18.0);
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Convert, "Convert");
-                ui.selectable_value(&mut self.tab, Tab::Tools, "Tools");
-                ui.selectable_value(&mut self.tab, Tab::Actions, "Actions");
-            });
-            ui.separator();
-            ui.add_space(16.0);
-            let Some(selected) = self.selected_file().cloned() else {
-                ui.label(
-                    RichText::new("A fresh start for every file.")
-                        .size(24.0)
-                        .strong()
-                        .color(CREAM),
-                );
-                ui.add_space(8.0);
-                ui.label("Add a file or drag one into this window to see what you can do.");
-                return;
-            };
-            ui.label(
-                RichText::new(format!(
-                    "{}  {}",
-                    icon(&selected),
-                    selected.file_name().unwrap_or_default().to_string_lossy()
-                ))
-                .size(23.0)
-                .strong()
-                .color(CREAM),
-            );
-            ui.label(format!(
-                "{} • {}",
-                engine::kind(&selected),
-                selected.parent().unwrap_or(&selected).display()
-            ));
-            ui.add_space(18.0);
-
-            match self.tab {
-                Tab::Convert => {
-                    ui.label(
-                        RichText::new("CONVERT TO")
-                            .size(11.0)
-                            .strong()
-                            .color(ORANGE),
-                    );
-                    ui.label("The same format is applied to every compatible file in your list.");
-                    ui.add_space(8.0);
-                    let formats = engine::formats(&selected);
-                    if formats.is_empty() {
-                        ui.label("No conversions are available for this file yet.");
-                    }
-                    for chunk in formats.chunks(4) {
-                        ui.horizontal(|ui| {
-                            for format in chunk {
-                                if ui
-                                    .add_enabled(
-                                        !self.busy,
-                                        egui::Button::new(format!("  {}  ", format.to_uppercase()))
-                                            .stroke(Stroke::new(1.0_f32, ORANGE)),
-                                    )
-                                    .clicked()
-                                {
-                                    self.convert_all(format);
-                                }
-                            }
-                        });
-                    }
-                }
-                Tab::Tools => {
-                    ui.label(
-                        RichText::new("FILE TOOLS")
-                            .size(11.0)
-                            .strong()
-                            .color(ORANGE),
-                    );
-                    let kind = engine::kind(&selected);
-                    let mut tools = Vec::new();
-                    if selected.is_dir() || kind != "Archive" {
-                        tools.push("Compress to ZIP");
-                    }
-                    if kind == "Archive" {
-                        tools.push("Extract archive");
-                    }
-                    if kind == "Image" {
-                        tools.push("Compress image");
-                    }
-                    if kind == "Video" {
-                        tools.extend(["Compress video", "Extract audio"]);
-                    }
-                    for tool in tools {
-                        if ui
-                            .add_enabled(!self.busy, egui::Button::new(tool))
-                            .clicked()
-                        {
-                            self.run_tool(tool);
-                        }
-                    }
-                    if kind == "Video" || kind == "Audio" {
-                        ui.separator();
-                        ui.label("Trim media");
-                        ui.horizontal(|ui| {
-                            ui.label("Start");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.trim_start)
-                                    .hint_text("00:00:00"),
-                            );
-                            ui.label("Duration");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.trim_duration)
-                                    .hint_text("00:00:10"),
-                            );
-                        });
-                        if ui
-                            .add_enabled(!self.busy, egui::Button::new("Trim"))
-                            .clicked()
-                        {
-                            let start = self.trim_start.clone();
-                            let duration = self.trim_duration.clone();
-                            let file = selected.clone();
-                            self.dispatch(move || {
-                                trim_media(&file, &start, &duration).map(|p| vec![p])
-                            });
-                        }
-                    }
-                    if kind == "Image" {
-                        ui.separator();
-                        ui.label("Resize image");
-                        ui.horizontal(|ui| {
-                            ui.label("Width (px)");
-                            ui.add(egui::TextEdit::singleline(&mut self.width).hint_text("1200"));
-                        });
-                        if ui
-                            .add_enabled(!self.busy, egui::Button::new("Resize"))
-                            .clicked()
-                        {
-                            let width = self.width.clone();
-                            let file = selected.clone();
-                            self.dispatch(move || resize_image(&file, &width).map(|p| vec![p]));
-                        }
-                        ui.label("Crop image: width:height:x:y");
-                        ui.add(egui::TextEdit::singleline(&mut self.crop).hint_text("800:600:0:0"));
-                        if ui
-                            .add_enabled(!self.busy, egui::Button::new("Crop"))
-                            .clicked()
-                        {
-                            let crop = self.crop.clone();
-                            let file = selected.clone();
-                            self.dispatch(move || crop_image(&file, &crop).map(|p| vec![p]));
-                        }
-                    }
-                    if kind == "Video" || kind == "Audio" {
-                        ui.separator();
-                        ui.label("Split into segments (seconds)");
-                        ui.add(egui::TextEdit::singleline(&mut self.split_seconds).hint_text("30"));
-                        if ui
-                            .add_enabled(!self.busy, egui::Button::new("Split"))
-                            .clicked()
-                        {
-                            let seconds = self.split_seconds.clone();
-                            let file = selected.clone();
-                            self.dispatch(move || split_media(&file, &seconds));
-                        }
-                        if self.files.len() > 1
-                            && ui
-                                .add_enabled(
-                                    !self.busy,
-                                    egui::Button::new("Merge matching media in list order"),
-                                )
-                                .clicked()
-                        {
-                            let files = self.files.clone();
-                            self.dispatch(move || merge_media(&files).map(|p| vec![p]));
-                        }
-                    }
-                }
-                Tab::Actions => {
-                    ui.label(
-                        RichText::new("QUICK ACTIONS")
-                            .size(11.0)
-                            .strong()
-                            .color(ORANGE),
-                    );
-                    for action in [
-                        "Copy path",
-                        "Reveal in Finder",
-                        "Open file",
-                        "Open in Terminal",
-                        "Copy to folder",
-                        "Move to folder",
-                    ] {
-                        if ui.button(action).clicked() {
-                            self.action(action, ctx);
-                        }
-                    }
-                }
-            }
-            ui.add_space(24.0);
-            if !self.last_outputs.is_empty() {
-                ui.separator();
-                ui.label(
-                    RichText::new("RECENT OUTPUT")
-                        .size(11.0)
-                        .strong()
-                        .color(ORANGE),
-                );
-                for path in &self.last_outputs {
-                    if ui
-                        .link(path.file_name().unwrap_or_default().to_string_lossy())
-                        .clicked()
-                    {
-                        let _ = Command::new("open").arg(path).spawn();
-                    }
-                }
-            }
-        });
-
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(if self.busy { "◌" } else { "●" }).color(ORANGE));
-                ui.label(if self.status.is_empty() {
-                    "Ready. Your files stay on this Mac."
-                } else {
-                    &self.status
-                });
-            });
-            ui.add_space(8.0);
-        });
     }
 }
 

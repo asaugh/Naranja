@@ -99,7 +99,7 @@ fn output_path(input: &Path, target: &str) -> io::Result<PathBuf> {
 }
 
 fn run(program: &str, args: &[&OsStr]) -> Result<(), String> {
-    let output = Command::new(program)
+    let output = Command::new(binary(program))
         .args(args)
         .output()
         .map_err(|error| format!("Could not start {program}: {error}"))?;
@@ -109,6 +109,22 @@ fn run(program: &str, args: &[&OsStr]) -> Result<(), String> {
         let detail = String::from_utf8_lossy(&output.stderr);
         Err(format!("{program} failed: {}", detail.trim()))
     }
+}
+
+// Finder launches apps with a smaller PATH than a terminal, so check Homebrew's
+// standard locations as well as the inherited path before starting a tool.
+pub fn binary(name: &str) -> PathBuf {
+    let mut directories: Vec<PathBuf> =
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+    directories.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]);
+    directories
+        .into_iter()
+        .map(|dir| dir.join(name))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 fn checked_run(program: &str, args: &[&OsStr], output: &Path) -> Result<(), String> {
@@ -320,7 +336,7 @@ pub fn extract(input: &Path) -> Result<PathBuf, String> {
         .unwrap_or("extracted");
     // A .gz may contain one ordinary file rather than a TAR archive.
     if ext == "gz"
-        && !Command::new("tar")
+        && !Command::new(binary("tar"))
             .arg("-tf")
             .arg(input)
             .output()
@@ -336,7 +352,7 @@ pub fn extract(input: &Path) -> Result<PathBuf, String> {
             file = parent.join(format!("{stem} {n}"));
         }
         let output = fs::File::create(&file).map_err(|e| e.to_string())?;
-        let status = Command::new("gzip")
+        let status = Command::new(binary("gzip"))
             .arg("-dc")
             .arg(input)
             .stdout(output)

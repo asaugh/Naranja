@@ -104,6 +104,8 @@ struct NaranjaApp {
     trim_start: String,
     trim_duration: String,
     width: String,
+    crop: String,
+    split_seconds: String,
 }
 
 impl NaranjaApp {
@@ -206,6 +208,14 @@ impl NaranjaApp {
                     .args(["-a", "Terminal", &folder])
                     .spawn();
                 self.status = "Opened Terminal".into();
+            }
+            "Copy to folder" | "Move to folder" => {
+                let Some(folder) = rfd::FileDialog::new().pick_folder() else {
+                    return;
+                };
+                let source = file.clone();
+                let move_file = action == "Move to folder";
+                self.dispatch(move || transfer_file(&source, &folder, move_file).map(|p| vec![p]));
             }
             _ => {}
         }
@@ -463,6 +473,40 @@ impl eframe::App for NaranjaApp {
                             let file = selected.clone();
                             self.dispatch(move || resize_image(&file, &width).map(|p| vec![p]));
                         }
+                        ui.label("Crop image: width:height:x:y");
+                        ui.add(egui::TextEdit::singleline(&mut self.crop).hint_text("800:600:0:0"));
+                        if ui
+                            .add_enabled(!self.busy, egui::Button::new("Crop"))
+                            .clicked()
+                        {
+                            let crop = self.crop.clone();
+                            let file = selected.clone();
+                            self.dispatch(move || crop_image(&file, &crop).map(|p| vec![p]));
+                        }
+                    }
+                    if kind == "Video" || kind == "Audio" {
+                        ui.separator();
+                        ui.label("Split into segments (seconds)");
+                        ui.add(egui::TextEdit::singleline(&mut self.split_seconds).hint_text("30"));
+                        if ui
+                            .add_enabled(!self.busy, egui::Button::new("Split"))
+                            .clicked()
+                        {
+                            let seconds = self.split_seconds.clone();
+                            let file = selected.clone();
+                            self.dispatch(move || split_media(&file, &seconds));
+                        }
+                        if self.files.len() > 1
+                            && ui
+                                .add_enabled(
+                                    !self.busy,
+                                    egui::Button::new("Merge matching media in list order"),
+                                )
+                                .clicked()
+                        {
+                            let files = self.files.clone();
+                            self.dispatch(move || merge_media(&files).map(|p| vec![p]));
+                        }
                     }
                 }
                 Tab::Actions => {
@@ -477,6 +521,8 @@ impl eframe::App for NaranjaApp {
                         "Reveal in Finder",
                         "Open file",
                         "Open in Terminal",
+                        "Copy to folder",
+                        "Move to folder",
                     ] {
                         if ui.button(action).clicked() {
                             self.action(action, ctx);
@@ -546,7 +592,7 @@ fn unique_named(input: &std::path::Path, suffix: &str) -> PathBuf {
 
 fn ffmpeg_tool(input: &std::path::Path, suffix: &str, options: &[&str]) -> Result<PathBuf, String> {
     let output = unique_named(input, suffix);
-    let status = Command::new("ffmpeg")
+    let status = Command::new(engine::binary("ffmpeg"))
         .args(["-nostdin", "-i"])
         .arg(input)
         .args(options)
@@ -589,7 +635,7 @@ fn resize_image(input: &std::path::Path, width: &str) -> Result<PathBuf, String>
     }
     let ext = engine::extension(input);
     let output = unique_named(input, &format!("resized.{ext}"));
-    let status = Command::new("sips")
+    let status = Command::new(engine::binary("sips"))
         .args(["--resampleWidth", width])
         .arg(input)
         .arg("--out")
@@ -601,4 +647,194 @@ fn resize_image(input: &std::path::Path, width: &str) -> Result<PathBuf, String>
         return Err(String::from_utf8_lossy(&status.stderr).trim().to_owned());
     }
     Ok(output)
+}
+
+fn crop_image(input: &std::path::Path, crop: &str) -> Result<PathBuf, String> {
+    let parts: Vec<u32> = crop
+        .split(':')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .map_err(|_| "Enter crop as width:height:x:y".to_owned())?;
+    if parts.len() != 4 || parts[0] == 0 || parts[1] == 0 || parts[0] > 20_000 || parts[1] > 20_000
+    {
+        return Err("Enter crop as width:height:x:y using positive dimensions".into());
+    }
+    let ext = engine::extension(input);
+    ffmpeg_tool(
+        input,
+        &format!("cropped.{ext}"),
+        &["-vf", &format!("crop={crop}")],
+    )
+}
+
+fn split_media(input: &std::path::Path, seconds: &str) -> Result<Vec<PathBuf>, String> {
+    let length: u32 = seconds
+        .parse()
+        .map_err(|_| "Enter a positive segment length in seconds".to_owned())?;
+    if !(1..=86_400).contains(&length) {
+        return Err("Segment length must be between 1 and 86,400 seconds".into());
+    }
+    let parent = input.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let stem = input.file_stem().unwrap_or_default().to_string_lossy();
+    let mut folder = parent.join(format!("{stem}-parts"));
+    let mut n = 2;
+    while folder.exists() {
+        folder = parent.join(format!("{stem}-parts-{n}"));
+        n += 1;
+    }
+    std::fs::create_dir(&folder).map_err(|e| e.to_string())?;
+    let pattern = folder.join(format!("part-%03d.{}", engine::extension(input)));
+    let output = Command::new(engine::binary("ffmpeg"))
+        .args(["-nostdin", "-i"])
+        .arg(input)
+        .args([
+            "-c",
+            "copy",
+            "-f",
+            "segment",
+            "-segment_time",
+            seconds,
+            "-reset_timestamps",
+            "1",
+        ])
+        .arg(&pattern)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let _ = std::fs::remove_dir_all(&folder);
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    let mut parts: Vec<_> = std::fs::read_dir(&folder)
+        .map_err(|e| e.to_string())?
+        .filter_map(|item| item.ok().map(|entry| entry.path()))
+        .collect();
+    parts.sort();
+    if parts.is_empty() {
+        return Err("No segments were created".into());
+    }
+    Ok(parts)
+}
+
+fn merge_media(files: &[PathBuf]) -> Result<PathBuf, String> {
+    if files.len() < 2 {
+        return Err("Add at least two media files".into());
+    }
+    let ext = engine::extension(&files[0]);
+    if !files.iter().all(|file| engine::extension(file) == ext) {
+        return Err("Merge requires files with the same extension".into());
+    }
+    let output = unique_named(&files[0], &format!("merged.{ext}"));
+    let temp = std::env::temp_dir().join(format!(
+        "naranja-merge-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_nanos()
+    ));
+    std::fs::create_dir(&temp).map_err(|e| e.to_string())?;
+    let result = (|| {
+        let mut list = String::new();
+        for (index, file) in files.iter().enumerate() {
+            let link = format!("part-{index:04}.{ext}");
+            std::os::unix::fs::symlink(
+                file.canonicalize().map_err(|e| e.to_string())?,
+                temp.join(&link),
+            )
+            .map_err(|e| e.to_string())?;
+            list.push_str(&format!("file '{link}'\n"));
+        }
+        std::fs::write(temp.join("list.txt"), list).map_err(|e| e.to_string())?;
+        let result = Command::new(engine::binary("ffmpeg"))
+            .current_dir(&temp)
+            .args([
+                "-nostdin", "-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy",
+            ])
+            .arg(&output)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if result.status.success() {
+            Ok(output.clone())
+        } else {
+            Err(String::from_utf8_lossy(&result.stderr).trim().to_owned())
+        }
+    })();
+    let _ = std::fs::remove_dir_all(&temp);
+    if result.is_err() {
+        let _ = std::fs::remove_file(&output);
+    }
+    result
+}
+
+fn transfer_file(
+    source: &std::path::Path,
+    folder: &std::path::Path,
+    move_file: bool,
+) -> Result<PathBuf, String> {
+    let name = source.file_name().ok_or("Invalid file name")?;
+    let mut destination = folder.join(name);
+    let mut n = 2;
+    while destination.exists() {
+        let stem = source.file_stem().unwrap_or(name).to_string_lossy();
+        let ext = source
+            .extension()
+            .map(|value| format!(".{}", value.to_string_lossy()))
+            .unwrap_or_default();
+        destination = folder.join(format!("{stem} {n}{ext}"));
+        n += 1;
+    }
+    if move_file {
+        // Rename is atomic on one volume; a cross-volume move reports an error instead of risking data loss.
+        std::fs::rename(source, &destination).map_err(|e| format!("Could not move file: {e}"))?;
+    } else if source.is_dir() {
+        let result = Command::new(engine::binary("ditto"))
+            .arg(source)
+            .arg(&destination)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !result.status.success() {
+            return Err(String::from_utf8_lossy(&result.stderr).trim().to_owned());
+        }
+    } else {
+        std::fs::copy(source, &destination).map_err(|e| e.to_string())?;
+    }
+    Ok(destination)
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+
+    #[test]
+    fn split_and_merge_generated_audio() {
+        if !engine::binary("ffmpeg").is_file() {
+            return;
+        }
+        let folder = std::env::temp_dir().join(format!("naranja-test-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let first = folder.join("first.wav");
+        let second = folder.join("second.wav");
+        for file in [&first, &second] {
+            let status = Command::new(engine::binary("ffmpeg"))
+                .args([
+                    "-nostdin",
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:duration=2",
+                ])
+                .arg(file)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        let parts = split_media(&first, "1").unwrap();
+        assert!(!parts.is_empty());
+        let merged = merge_media(&[first, second]).unwrap();
+        assert!(merged.metadata().unwrap().len() > 0);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
 }

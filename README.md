@@ -8,14 +8,14 @@ Naranja is inspired by the quick file workflow of [Tangerine for Mac](https://ta
 
 | Area | Supported operations |
 | --- | --- |
-| Images | Convert among JPG, PNG, WebP, HEIC, TIFF, BMP, GIF, and AVIF where the installed codecs allow it; resize and compress |
+| Images | Convert among JPG, PNG, WebP, HEIC, TIFF, BMP, GIF, and AVIF where the installed codecs allow it; resize, crop, and compress |
 | Audio | Convert MP3, M4A, WAV, FLAC, OGG, Opus, AIFF, and WMA |
-| Video | Convert MP4, MOV, MKV, WebM, AVI, WMV, and GIF; extract MP3; trim and compress |
+| Video | Convert MP4, MOV, MKV, WebM, AVI, WMV, and GIF; extract MP3; trim, split, merge, and compress |
 | Documents | Convert TXT, RTF, HTML, DOCX, and ODT through macOS TextEdit's `textutil` |
 | Tables | Convert CSV and TSV with quoted cells preserved |
 | Subtitles | Convert SRT, VTT, and plain text |
 | Archives | Create ZIP or TAR archives; extract ZIP, TAR, and GZIP archives |
-| Actions | Copy path, reveal in Finder, open file, open its folder in Terminal |
+| Actions | Copy path, reveal in Finder, open file, open its folder in Terminal, copy or move into another folder |
 
 Conversions run locally. Outputs receive a new name when a file with the intended name already exists, so an original is not overwritten. Batch conversion applies the chosen format to all compatible files in the list.
 
@@ -48,7 +48,7 @@ cargo run --release -- extract archive.zip
 
 ## Scope and roadmap
 
-This is an early working release. Tangerine currently describes a much larger set of conversion paths and advanced tools. Naranja does **not** yet have a global Finder drag overlay, AirDrop and floating-file actions, PDF and Office conversions, crop/split/merge tools, or every codec combination. The interface only lists operations implemented in this repository; codecs supplied by FFmpeg and macOS can still vary by machine. Contributions toward these areas are welcome.
+This is an early working release. Tangerine currently describes a much larger set of conversion paths and advanced tools. Naranja does **not** yet have a global Finder drag overlay, AirDrop and floating-file actions, PDF and Office conversions, or every codec combination. The interface only lists operations implemented in this repository; codecs supplied by FFmpeg and macOS can still vary by machine. Contributions toward these areas are welcome.
 
 Good next steps: a global drag trigger with macOS Accessibility permission, an explicit conversion capability registry, PDF/Office backends, more media tools, and signed release builds.
 

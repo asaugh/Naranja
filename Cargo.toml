@@ -1,0 +1,15 @@
+[package]
+name = "naranja"
+version = "0.1.0"
+edition = "2024"
+description = "A free, local-first macOS file converter"
+license = "MIT"
+repository = "https://github.com/asaugh/Naranja"
+
+[dependencies]
+eframe = { version = "0.32.3", default-features = false, features = ["glow", "default_fonts"] }
+rfd = { version = "0.15.4", default-features = false }
+
+[profile.release]
+strip = true
+lto = "thin"
